@@ -1,6 +1,7 @@
 import csv
 import os
 import sys
+import shutil
 
 sys.setrecursionlimit(1500)
 path = '/home/vssl/PythonProject/cw_sp500/'
@@ -57,9 +58,6 @@ def cach_date(dt, ticker, f_name):        # Был ли запрос ранее
             else:
                 print(f'Директория {cach_path} успешно создана')
 
-        # tmp_file = open(full_cach_filename, 'w+')
-        # tmp_file.close()
-
         return False
 
 def batch_date():
@@ -103,9 +101,9 @@ def sort_date():
     cntr_name = 0
     header = []
     for file in files:
-        if file.find('batch_date_'):
+        if file.find('batch_date_') != -1:
             cntr_date += 1
-        if file.find('batch_name_'):
+        if file.find('batch_name_') != -1:
             cntr_name += 1
 
     if cntr_date == cntr_name:
@@ -132,9 +130,83 @@ def sort_date():
         r_file.close()
         w_file.close()
 
+def merge_tail(pointer, write_file):
+    for row in pointer:
+        write_file.writerow(row)
 
 def merge_date():
+    """Из отсортированных по дате файлов /tmp/batch_date_xx.csv
+    собираю большой отсортированный /tmp/date_sorted.csv"""
     print('Сливаю всё в файл /tmp/date_sorted.csv')
+    path_tmp = path + 'tmp/'
+    files = os.listdir(path_tmp)
+    cntr_date = 0  # Считаю количество нужных файлов
+    header = []
+    for file in files:
+        if file.find('batch_date_') != -1:
+            cntr_date += 1
+
+    for i in range(cntr_date):
+        file_i = path_tmp + f'{str(i) if len(str(i)) == 2 else "0" + str(i)}' + '.csv'
+        batch_file_date = path_tmp + f'batch_date_{str(i) if len(str(i)) == 2 else "0" + str(i)}' + '.csv'
+
+        if i == 0:
+            shutil.copy(batch_file_date, file_i)  # Файл 00.csv тупо копирую из batch_date_00.csv
+        else:
+            prev_file = open(path_tmp + f'{str(i-1) if len(str(i-1)) == 2 else "0" + str(i-1)}' + '.csv')
+            prev_reader = csv.reader(prev_file)    # Большой слитый отсортированный файл
+            header = next(prev_reader)
+
+            res_file = open(path_tmp + f'{str(i) if len(str(i)) == 2 else "0" + str(i)}' + '.csv', 'w')
+            res_writer = csv.writer(res_file)   # Файл, куда сливаю отсортированные данные
+            res_writer.writerow(header)
+
+            date_file = open(path_tmp + f'batch_date_{str(i) if len(str(i)) == 2 else "0" + str(i)}' + '.csv')
+            date_reader = csv.reader(date_file)
+            tmp = next(date_reader)
+
+            row_prev = next(prev_reader)    # Считал первые строки файлов - источников
+            row_date = next(date_reader)
+
+            while True:
+                if row_prev[0] < row_date[0]:
+                    res_writer.writerow(row_prev)
+                    try:
+                        row_prev = next(prev_reader)
+                    except:     # prev_file закончился, остатки date_file сливаю в res_file
+                        merge_tail(date_reader, res_writer)
+                        break
+                elif row_prev[0] > row_date[0]:
+                    res_writer.writerow(row_date)
+                    try:
+                        row_date = next(date_reader)
+                    except:     # date_file закончился, остатки prev_file сливаю в res_file
+                        merge_tail(prev_reader, res_writer)
+                        break
+                else:       # Поля date равны, смотрю поле name
+                    if row_prev[6] < row_date[6]:
+                        res_writer.writerow(row_prev)
+                        try:
+                            row_prev = next(prev_reader)
+                        except:  # prev_file закончился, остатки date_file сливаю в res_file
+                            merge_tail(date_reader, res_writer)
+                            break
+                    else:
+                        res_writer.writerow(row_date)
+                        try:
+                            row_date = next(date_reader)
+                        except:  # date_file закончился, остатки prev_file сливаю в res_file
+                            merge_tail(prev_reader, res_writer)
+                            break
+
+            prev_file.close()
+            date_file.close()
+            res_file.close()
+
+    file_source = path_tmp + f'{str(cntr_date-1) if len(str(cntr_date-1)) == 2 else "0" + str(cntr_date-1)}' + '.csv'
+    file_dest = path_tmp + 'date_sorted.csv'
+    shutil.copy(file_source, file_dest)
+
 
 def batch_sort_date():
     print('Шинкую файл на сортированные файлики для поиска по запросу')
@@ -147,7 +219,6 @@ def get_by_date(date='2013-02-08', name='AAL', filename='dump.csv'):
     if cach_date(date, name, filename):     # Определяю, нужно ли работать
         return
     batch_date()        # Шинкую файл данных на файлики в /tmp/banch_date_xx.csv
-    input('Press any key')
     sort_date()         # Сортирую каждый файлик по дате
     merge_date()        # Сливаю всё в файл /tmp/date_sorted.csv
     batch_sort_date()   # Шинкую файл на сортированные файлики для поиска по запросу
